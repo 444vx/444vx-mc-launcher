@@ -5,10 +5,8 @@
 #include <string>
 #include <vector>
 #include <functional>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
 #include <thread>
+#include <chrono>
 
 using json = nlohmann::json;
 
@@ -62,8 +60,6 @@ std::vector<Instance> loadInstances() {
 
 struct Account {
     std::string username;
-    std::string uuid;
-    std::string accessToken;
     bool active = false;
 };
 
@@ -73,8 +69,6 @@ void saveAccounts(const std::vector<Account>& accounts) {
     for (auto& a : accounts) {
         json acc;
         acc["username"] = a.username;
-        acc["uuid"] = a.uuid;
-        acc["accessToken"] = a.accessToken;
         acc["active"] = a.active;
         j.push_back(acc);
     }
@@ -90,12 +84,16 @@ std::vector<Account> loadAccounts() {
     for (auto& a : j) {
         Account acc;
         acc.username = a.value("username", "");
-        acc.uuid = a.value("uuid", "");
-        acc.accessToken = a.value("accessToken", "");
         acc.active = a.value("active", false);
         accounts.push_back(acc);
     }
     return accounts;
+}
+
+Account getActiveAccount() {
+    for (auto& a : loadAccounts())
+        if (a.active) return a;
+    return {};
 }
 
 static const char* CSS = R"(
@@ -405,7 +403,6 @@ public:
             header->add_controller(gesture);
 
             m_instances_box.append(*card);
-
             auto sep = Gtk::make_managed<Gtk::Separator>(Gtk::Orientation::HORIZONTAL);
             m_instances_box.append(*sep);
         }
@@ -530,7 +527,7 @@ public:
         m_title.set_markup("<span font='20' weight='bold'>Accounts</span>");
         m_title.set_halign(Gtk::Align::START);
 
-        m_subtitle.set_text("Click an account to set it as active");
+        m_subtitle.set_text("Add your username to play");
         m_subtitle.set_halign(Gtk::Align::START);
         m_subtitle.add_css_class("subtitle");
 
@@ -538,21 +535,35 @@ public:
         m_scroll.set_child(m_list);
         m_list.set_selection_mode(Gtk::SelectionMode::NONE);
 
-        m_btn_add.set_label("+ Add Microsoft Account");
-        m_btn_add.set_halign(Gtk::Align::START);
+        // Add account form
+        m_form_box.set_orientation(Gtk::Orientation::HORIZONTAL);
+        m_form_box.set_spacing(10);
+
+        m_name_entry.set_placeholder_text("Enter username...");
+        m_name_entry.set_hexpand(true);
+
+        m_btn_add.set_label("+ Add Account");
         m_btn_add.signal_clicked().connect([this]() {
-            std::string url = "https://login.live.com/oauth20_authorize.srf"
-                "?client_id=00000000402b5328"
-                "&response_type=code"
-                "&scope=service%3A%3AXboxLive.signin%3A%3AMBI_SSL"
-                "&redirect_uri=http%3A%2F%2Flocalhost%3A9999";
-            system(("xdg-open '" + url + "' &").c_str());
+            std::string name = m_name_entry.get_text();
+            if (name.empty()) return;
+            Account acc;
+            acc.username = name;
+            acc.active = true;
+            auto all = loadAccounts();
+            for (auto& a : all) a.active = false;
+            all.push_back(acc);
+            saveAccounts(all);
+            m_name_entry.set_text("");
+            refresh();
         });
+
+        m_form_box.append(m_name_entry);
+        m_form_box.append(m_btn_add);
 
         append(m_title);
         append(m_subtitle);
         append(m_scroll);
-        append(m_btn_add);
+        append(m_form_box);
 
         refresh();
     }
@@ -565,7 +576,7 @@ public:
 
         if (accounts.empty()) {
             auto row = Gtk::make_managed<Gtk::ListBoxRow>();
-            auto lbl = Gtk::make_managed<Gtk::Label>("No accounts. Click '+ Add Microsoft Account'.");
+            auto lbl = Gtk::make_managed<Gtk::Label>("No accounts. Add your username below.");
             lbl->set_halign(Gtk::Align::START);
             lbl->add_css_class("subtitle");
             lbl->set_margin(20);
@@ -620,6 +631,8 @@ private:
     Gtk::Label m_title, m_subtitle;
     Gtk::ScrolledWindow m_scroll;
     Gtk::ListBox m_list;
+    Gtk::Box m_form_box;
+    Gtk::Entry m_name_entry;
     Gtk::Button m_btn_add;
 };
 
